@@ -12,7 +12,7 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
 
-class LoadData:
+class DataLoader:
     def __init__(self):
         (self.data, self.data_info) = tfds.load('scene_parse150', with_info=True)
 
@@ -29,12 +29,14 @@ class LoadData:
         return self.data_info
 
 def main():
-    ld = LoadData()
-    data = ld.getTestData()
-    data_info = ld.getDataInfo()
+    dl = DataLoader()
+    data = dl.getTestData()
+    data_info = dl.getDataInfo()
     print("Main function")
 
-    print(type(data))
+# TODO : Understand how the data is structured and how to access one datapoint in the dataset.
+    for d in data:
+        print(d)
 
 if __name__ == '__main__':
     main()
