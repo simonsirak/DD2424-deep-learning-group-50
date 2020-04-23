@@ -24,16 +24,23 @@ class A1(tf.keras.Model):
   def __init__(self, lambda_, num_classes=10):
     super(A1, self).__init__(name="assignment_1")
     self.dense0 = tf.keras.layers.Flatten()
+    self.bn0 = tf.keras.layers.BatchNormalization()
     self.dense1 = tf.keras.layers.Dense(50, activation="relu", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
-    self.dense2 = tf.keras.layers.Dense(num_classes, activation="softmax", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
+    self.bn1 = tf.keras.layers.BatchNormalization()
+    self.dense2 = tf.keras.layers.Dense(50, activation="relu", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
+    self.bn2 = tf.keras.layers.BatchNormalization()
+    self.dense3 = tf.keras.layers.Dense(num_classes, activation="softmax", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
 
   def call(self, inputs):
     inp = tf.dtypes.cast(inputs, tf.float32) / 255.0
     x = self.dense0(inp)
+    x = self.bn0(x)
     x = self.dense1(x)
+    x = self.bn1(x)
     x = self.dense2(x)
+    x = self.bn2(x)
     #print(x)
-    return x
+    return self.dense3(x)
 
 # tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
@@ -68,4 +75,4 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
   # y is part of x when x is a Dataset
   model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup")])
 
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10, resume=True)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10, resume=False)
