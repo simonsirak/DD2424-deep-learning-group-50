@@ -6,7 +6,7 @@ from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
 
 # nr of images
 size = 50062
-batch_size = 64
+batch_size = 128
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
