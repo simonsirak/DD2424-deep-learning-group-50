@@ -61,18 +61,52 @@ model = A1(0.005, num_classes)
 # should be able to plot measurements over time, e.g loss/cost and accuracy
 # should save checkpoints every epoch that can be restored
 # should be able to resume training from paused model
-def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_size=64, epochs=10, resume=False):
+def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_size=64, epochs=10, backup_path=None):
   train_dataset = train_dataset.batch(batch_size)
   val_dataset = val_dataset.batch(batch_size)
 
-  if(resume):
-    #print("LOOOOOOOOOOOOOOOOOOOOOOOOOK")
-    model.load_weights("backup")
-    #print("LOOOOOOOOOOOOOOOOOOOOOOOOOK")
-
   model.compile(optimizer="sgd",loss=loss_fn(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
 
-  # y is part of x when x is a Dataset
-  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup")])
+  if(backup_path is not None):
+    # Assume "epochs" has been adapted to train as long as is left at the point of this checkpoint.
+    model.load_weights(backup_path)
 
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10, resume=False)
+  # y is part of x when x is a Dataset
+  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup{epoch:02d}of" + str(epochs))])
+
+
+##########################
+# PLAYING AROUND/TESTING #
+##########################
+
+# Regular training of a model
+# train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+
+# load test data for evaluation
+# Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
+# This is because custom models are defined through their call()-function, which is run when you use 
+# the model.
+test_ds = tfds.load('cifar10', split='test', as_supervised=True)
+test_ds = test_ds.shuffle(1024)
+test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
+
+# load saved model (compiling needs to be done before loading weights for some reason, don't quite understand why)
+halfway = A1(0.005, num_classes)
+
+# model that resumed from halfway
+train_model(halfway, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=5, backup_path="backup05of10")
+res = halfway.evaluate(test_ds)
+print()
+print(" HALFWAY->FULL RESULTS ")
+print(res)
+
+# model that kept going from beginning to end, the halfway point came from the same training session as this model
+full = A1(0.005, num_classes)
+full.compile(optimizer="sgd",loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
+full.load_weights("backup10of10")
+res = full.evaluate(test_ds)
+print()
+print(" BEGINNING->FULL RESULTS ")
+print(res)
+
+# The two above should yield similar results, +- randomness in training 
