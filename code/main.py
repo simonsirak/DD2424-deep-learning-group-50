@@ -22,9 +22,11 @@ val_ds = loader.getValData()
 val_ds = val_ds.shuffle(1024)
 
 # Create model class yourself if you want
-class A1(tf.keras.Model):
+class DummyModel(tf.keras.Model):
   def __init__(self, lambda_, num_classes=10):
-    super(A1, self).__init__(name="assignment_1")
+    super(DummyModel, self).__init__(name="assignment_1")
+    self.base_model = tf.keras.applications.resnet50.ResNet50(weights="imagenet", include_top=False)
+    self.base_model.trainable = False
     self.dense0 = tf.keras.layers.Flatten()
     self.bn0 = tf.keras.layers.BatchNormalization()
     self.dense1 = tf.keras.layers.Dense(50, activation="relu", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
@@ -35,7 +37,8 @@ class A1(tf.keras.Model):
 
   def call(self, inputs):
     inp = tf.dtypes.cast(inputs, tf.float32) / 255.0
-    x = self.dense0(inp)
+    x = self.base_model(inp)
+    x = self.dense0(x)
     x = self.bn0(x)
     x = self.dense1(x)
     x = self.bn1(x)
@@ -54,7 +57,7 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
 num_classes = 10
-model = A1(0.005, num_classes)
+model = DummyModel(0.005, num_classes)
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -93,7 +96,7 @@ test_ds = test_ds.shuffle(1024)
 test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
 
 # load saved model (compiling needs to be done before loading weights for some reason, don't quite understand why)
-halfway = A1(0.005, num_classes)
+halfway = DummyModel(0.005, num_classes)
 
 # model that resumed from halfway
 train_model(halfway, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=5, backup_path="backup05of10")
@@ -103,7 +106,7 @@ print(" HALFWAY->FULL RESULTS ")
 print(res)
 
 # model that kept going from beginning to end, the halfway point came from the same training session as this model
-full = A1(0.005, num_classes)
+full = DummyModel(0.005, num_classes)
 full.compile(optimizer="sgd",loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
 full.load_weights("backup10of10")
 res = full.evaluate(test_ds)
