@@ -4,19 +4,21 @@ import tensorflow_datasets as tfds
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
 
+from load_data import DataLoader
+
 # nr of images
 size = 50062
 batch_size = 128
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
-train_ds = tfds.load('cifar10', split='train[:90%]', as_supervised=True)
+
+loader = DataLoader('cifar10', '90%')
+train_ds = loader.getTrainData()
 train_ds = train_ds.shuffle(1024)
 
-print(train_ds)
-
 # 5006
-val_ds = tfds.load('cifar10', split='train[90%:]', as_supervised=True)
+val_ds = loader.getValData()
 val_ds = val_ds.shuffle(1024)
 
 # Create model class yourself if you want
@@ -80,13 +82,13 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-# train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
 # This is because custom models are defined through their call()-function, which is run when you use 
 # the model.
-test_ds = tfds.load('cifar10', split='test', as_supervised=True)
+test_ds = loader.getTestData()
 test_ds = test_ds.shuffle(1024)
 test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
 

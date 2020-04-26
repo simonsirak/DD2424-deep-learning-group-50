@@ -13,10 +13,10 @@ import tensorflow_datasets as tfds
 
 
 class DataLoader:
-    def __init__(self, training_split='90%'):
-        self.train_data, self.train_info = tfds.load('scene_parse150', split='train[:' + training_split + "]", as_supervised=True, with_info=True)
-        self.val_data, self.val_info = tfds.load('scene_parse150', split='train[' + training_split + ":]", as_supervised=True, with_info=True)
-        self.test_data, self.test_info = tfds.load('scene_parse150', split='test', as_supervised=True, with_info=True)
+    def __init__(self, dataset_name='scene_parse150', training_split='90%'):
+        self.train_data, self.train_info = tfds.load(dataset_name, split='train[:' + training_split + "]", as_supervised=True, with_info=True)
+        self.val_data, self.val_info = tfds.load(dataset_name, split='train[' + training_split + ":]", as_supervised=True, with_info=True)
+        self.test_data, self.test_info = tfds.load(dataset_name, split='test', as_supervised=True, with_info=True)
 
     def getAllData(self):
         return (self.train_data, self.val_data, self.test_data)
@@ -32,16 +32,3 @@ class DataLoader:
 
     def getDataInfo(self):
         return (self.train_info, self.val_info, self.test_info)
-
-def main():
-    dl = DataLoader()
-    data = dl.getTestData()
-    data_info = dl.getDataInfo()
-    print("Main function")
-
-# TODO : Understand how the data is structured and how to access one datapoint in the dataset.
-    for d in data:
-        print(d)
-
-if __name__ == '__main__':
-    main()
