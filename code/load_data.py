@@ -13,20 +13,25 @@ import tensorflow_datasets as tfds
 
 
 class DataLoader:
-    def __init__(self):
-        (self.data, self.data_info) = tfds.load('scene_parse150', with_info=True)
+    def __init__(self, training_split='90%'):
+        self.train_data, self.train_info = tfds.load('scene_parse150', split='train[:' + training_split + "]", as_supervised=True, with_info=True)
+        self.val_data, self.val_info = tfds.load('scene_parse150', split='train[' + training_split + ":]", as_supervised=True, with_info=True)
+        self.test_data, self.test_info = tfds.load('scene_parse150', split='test', as_supervised=True, with_info=True)
 
     def getAllData(self):
-        return self.data
+        return (self.train_data, self.val_data, self.test_data)
 
     def getTrainData(self):
-        return self.data.get('train')
+        return self.train_data
+
+    def getValData(self):
+        return self.val_data
 
     def getTestData(self):
-        return self.data.get('test')
+        return self.test_data
 
     def getDataInfo(self):
-        return self.data_info
+        return (self.train_info, self.val_info, self.test_info)
 
 def main():
     dl = DataLoader()
