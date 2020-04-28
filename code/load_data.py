@@ -7,6 +7,9 @@
 # Author: David Yu, Simon Sirak, Kristoffer Chammas
 # Date: 2020-04-21
 # Latest update: 2020-04-21
+#
+# Update: 2020-04-28
+# Added function(s) for casting and normalizing the data
 
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
@@ -17,6 +20,12 @@ class DataLoader:
         self.train_data, self.train_info = tfds.load(dataset_name, split='train[:' + training_split + "]", as_supervised=True, with_info=True)
         self.val_data, self.val_info = tfds.load(dataset_name, split='train[' + training_split + ":]", as_supervised=True, with_info=True)
         self.test_data, self.test_info = tfds.load(dataset_name, split='test', as_supervised=True, with_info=True)
+
+    # function that uses map to cast and normalize data
+    def normalizeAllData(self):
+        self.train_data = self.train_data.map(preprocess_input)
+        self.val_data = self.val_data.map(preprocess_input)
+        self.test_data = self.test_data.map(preprocess_input)
 
     def getAllData(self):
         return (self.train_data, self.val_data, self.test_data)
@@ -32,3 +41,11 @@ class DataLoader:
 
     def getDataInfo(self):
         return (self.train_info, self.val_info, self.test_info)
+
+# function that is used in the map function
+# it casts and normalizes the data
+# note that @tf.function has to be used to prevent unexpected exceptions
+@tf.function
+def preprocess_input(x, y):
+    x = tf.dtypes.cast(x, tf.float32)
+    return tf.keras.applications.resnet50.preprocess_input(x), y
