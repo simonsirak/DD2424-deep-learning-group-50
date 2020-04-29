@@ -14,6 +14,13 @@ batch_size = 128
 # 45056
 
 loader = DataLoader('cifar10', '90%')
+
+# normalize all the data before usage
+# this includes casting the images to float32
+# as well as using the preprocess_input function from tf.keras.applications.resnet50
+# (removed casting and normalizing from the call function)
+loader.normalizeAllData()
+
 train_ds = loader.getTrainData()
 train_ds = train_ds.shuffle(1024)
 
@@ -36,8 +43,7 @@ class DummyModel(tf.keras.Model):
     self.dense3 = tf.keras.layers.Dense(num_classes, activation="softmax", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
 
   def call(self, inputs):
-    inp = tf.dtypes.cast(inputs, tf.float32) / 255.0
-    x = self.base_model(inp)
+    x = self.base_model(inputs)
     x = self.dense0(x)
     x = self.bn0(x)
     x = self.dense1(x)
