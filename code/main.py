@@ -32,7 +32,7 @@ val_ds = val_ds.shuffle(1024)
 class DummyModel(tf.keras.Model):
   def __init__(self, lambda_, num_classes=10):
     super(DummyModel, self).__init__(name="assignment_1")
-    self.base_model = tf.keras.applications.resnet50.ResNet50(weights="imagenet", include_top=False)
+    self.base_model = tf.keras.applications.resnet.ResNet101(weights="imagenet", include_top=False)
     self.base_model.trainable = False
     self.dense0 = tf.keras.layers.Flatten()
     self.bn0 = tf.keras.layers.BatchNormalization()
@@ -64,6 +64,12 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
 
 num_classes = 10
 model = DummyModel(0.005, num_classes)
+tmp_model = tf.keras.Sequential([
+  tf.keras.applications.resnet.ResNet152(input_shape=(1024,2048,3), weights="imagenet", include_top=False),
+  tf.keras.layers.Conv2D(filters=30, kernel_size=(3,3), strides=(2,2), padding='same', dilation_rate=(1,1))
+])
+
+tmp_model.summary()
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -91,33 +97,33 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+# train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
 # This is because custom models are defined through their call()-function, which is run when you use 
 # the model.
-test_ds = loader.getTestData()
-test_ds = test_ds.shuffle(1024)
-test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
+# test_ds = loader.getTestData()
+# test_ds = test_ds.shuffle(1024)
+# test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
 
-# load saved model (compiling needs to be done before loading weights for some reason, don't quite understand why)
-halfway = DummyModel(0.005, num_classes)
+# # load saved model (compiling needs to be done before loading weights for some reason, don't quite understand why)
+# halfway = DummyModel(0.005, num_classes)
 
-# model that resumed from halfway
-train_model(halfway, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=5, backup_path="backup05of10")
-res = halfway.evaluate(test_ds)
-print()
-print(" HALFWAY->FULL RESULTS ")
-print(res)
+# # model that resumed from halfway
+# train_model(halfway, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=5, backup_path="backup05of10")
+# res = halfway.evaluate(test_ds)
+# print()
+# print(" HALFWAY->FULL RESULTS ")
+# print(res)
 
-# model that kept going from beginning to end, the halfway point came from the same training session as this model
-full = DummyModel(0.005, num_classes)
-full.compile(optimizer="sgd",loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
-full.load_weights("backup10of10")
-res = full.evaluate(test_ds)
-print()
-print(" BEGINNING->FULL RESULTS ")
-print(res)
+# # model that kept going from beginning to end, the halfway point came from the same training session as this model
+# full = DummyModel(0.005, num_classes)
+# full.compile(optimizer="sgd",loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
+# full.load_weights("backup10of10")
+# res = full.evaluate(test_ds)
+# print()
+# print(" BEGINNING->FULL RESULTS ")
+# print(res)
 
 # The two above should yield similar results, +- randomness in training 

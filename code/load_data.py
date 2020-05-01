@@ -45,5 +45,4 @@ def preprocess_input(x):
     xx["label"] = x["label"]
     xx["image"] = tf.dtypes.cast(xx["image"], tf.float32)
     xx["image"] = tf.keras.applications.resnet.preprocess_input(xx["image"])
-    x = xx
-    return x
+    return (xx["image"], xx["label"])
