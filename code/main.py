@@ -62,14 +62,46 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
       y_pred = tf.argmax(y_pred, axis=-1) # do this because I think the predicted value is always one-hot vector I THINK
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
-num_classes = 10
-model = DummyModel(0.005, num_classes)
-tmp_model = tf.keras.Sequential([
-  tf.keras.applications.resnet.ResNet152(input_shape=(1024,2048,3), weights="imagenet", include_top=False),
-  tf.keras.layers.Conv2D(filters=30, kernel_size=(3,3), strides=(2,2), padding='same', dilation_rate=(1,1))
-])
+# num_classes = 10
+# model = DummyModel(0.005, num_classes)
+# tmp_model = tf.keras.Sequential([
+#   tf.keras.applications.resnet.ResNet50(input_shape=(1024,2048,3), weights="imagenet", include_top=False),
+#   tf.keras.layers.Conv2D(filters=30, kernel_size=(3,3), strides=(2,2), padding='same', dilation_rate=(1,1))
+# ])
 
-tmp_model.summary()
+# tmp_model.summary()
+
+mdl = tf.keras.applications.resnet.ResNet50(input_shape=(1024,2048,3), weights="imagenet", include_top=False)
+
+mdl.summary()
+
+# CHANGE LAYERS
+
+layer_3_conv2 = mdl.get_layer('conv4_block1_1_conv') # conv4_block1_1_conv (Conv2D)    (None, 64, 128, 256) 131328      conv3_block4_out[0][0]           
+layer_3_downsample = mdl.get_layer('conv4_block1_0_conv') # conv4_block1_0_conv (Conv2D)    (None, 64, 128, 1024 525312      conv3_block4_out[0][0]           
+
+layer_4_conv2 = mdl.get_layer('conv5_block1_1_conv') # conv5_block1_1_conv (Conv2D)    (None, 32, 64, 512)  524800      conv4_block6_out[0][0]           
+layer_4_downsample = mdl.get_layer('conv5_block1_0_conv') # conv5_block1_0_conv (Conv2D)    (None, 32, 64, 2048) 2099200     conv4_block6_out[0][0]           
+
+layer_3_conv2.strides = (1,1)
+layer_3_conv2.padding = 'same'
+layer_3_conv2.dilation_rate = (2,2)
+
+layer_3_downsample.strides = (1,1)
+
+layer_4_conv2.strides = (1,1)
+layer_4_conv2.padding = 'same'
+layer_4_conv2.dilation_rate = (4,4)
+
+layer_4_downsample.strides = (1,1)
+
+from tensorflow.keras.models import model_from_json          
+
+mdl = model_from_json(mdl.to_json())
+mdl.summary()
+print(mdl.output_shape)
+# layer = mdl.get_layer('conv4_block21_2_conv') # conv4_block21_1_conv (Conv2D)   (None, 64, 128, 256) 262400      conv4_block20_out[0][0]
+# print(layer.filters)
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
