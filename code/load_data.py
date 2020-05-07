@@ -45,4 +45,6 @@ def preprocess_input(x):
     xx["segmentation_label"] = x["segmentation_label"]
     xx["image_left"] = tf.dtypes.cast(xx["image_left"], tf.float32)
     xx["image_left"] = tf.keras.applications.resnet.preprocess_input(xx["image_left"])
+    xx["image_left"] = tf.image.resize(xx["image_left"], (512,1024), method='nearest')
+    xx["segmentation_label"] = tf.image.resize(xx["segmentation_label"], (512,1024), method='nearest')
     return (xx["image_left"], xx["segmentation_label"])
