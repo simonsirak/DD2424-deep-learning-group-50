@@ -41,6 +41,7 @@ class DataLoader:
 @tf.function
 def preprocess_input(x):
     xx = {}
+<<<<<<< HEAD
     xx["image_left"] = x["image_left"]
     xx["segmentation_label"] = x["segmentation_label"]
     xx["image_left"] = tf.dtypes.cast(xx["image_left"], tf.float32)
@@ -48,3 +49,10 @@ def preprocess_input(x):
     xx["image_left"] = tf.image.resize(xx["image_left"], (512,1024), method='nearest')
     xx["segmentation_label"] = tf.image.resize(xx["segmentation_label"], (512,1024), method='nearest')
     return (xx["image_left"], xx["segmentation_label"])
+=======
+    xx["image"] = x["image"]
+    xx["label"] = x["label"]
+    xx["image"] = tf.dtypes.cast(xx["image"], tf.float32)
+    xx["image"] = tf.keras.applications.resnet.preprocess_input(xx["image"])
+    return (xx["image"], xx["label"])
+>>>>>>> 24a89b520ca4fd6929129a9e6faee5acfd08076d
