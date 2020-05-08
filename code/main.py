@@ -9,12 +9,12 @@ from load_data import DataLoader
 
 # nr of images
 size = 50062
-batch_size = 1
+batch_size = 8
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
 
-loader = DataLoader('cityscapes', '5')
+loader = DataLoader('cityscapes', '10%')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -29,13 +29,16 @@ train_ds = loader.getTrainData()
 val_ds = loader.getValData()
 #val_ds = val_ds.shuffle(1024)
 
-# Create model class yourself if you want
-class DummyModel(tf.keras.Model):
-  def __init__(self, num_classes=30):
-    super(DummyModel, self).__init__(name="baseWithPyramidPooling")
-    # CHANGE LAYERS
-    self.base_model = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
+#test_ds = loader.getTestData()
 
+class MyModel(tf.keras.Model):
+
+  def __init__(self, num_classes=30):
+    super(MyModel, self).__init__(name="baseWithPyramidPooling")
+
+    # base model
+    self.base_model = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
+    
     layer_3_conv2 = self.base_model.get_layer('conv4_block1_1_conv') # conv4_block1_1_conv (Conv2D)    (None, 64, 128, 256) 131328      conv3_block4_out[0][0]           
     layer_3_downsample = self.base_model.get_layer('conv4_block1_0_conv') # conv4_block1_0_conv (Conv2D)    (None, 64, 128, 1024 525312      conv3_block4_out[0][0]           
 
@@ -56,7 +59,6 @@ class DummyModel(tf.keras.Model):
 
     self.base_model = model_from_json(self.base_model.to_json())
 
-    # base model
     self.base_model.trainable = True
 
     # upsample (just temporary)
@@ -71,7 +73,7 @@ class DummyModel(tf.keras.Model):
     self.features = []
 
     bins = [1,2,3,6]
-    inp_dim = (128,256)
+    inp_dim = (32,64)
     for bin_ in bins:
       strides = (inp_dim[0] // bin_, inp_dim[1] // bin_)
       kernel_size = (inp_dim[0] - (bin_-1)*strides[0], inp_dim[1] - (bin_-1)*strides[1])
@@ -95,33 +97,40 @@ class DummyModel(tf.keras.Model):
     self.soft0 = tf.keras.layers.Softmax()
 
   def call(self, input):
-
-    feature_map = self.base_model(input)
     
-    poolings = [feature_map]
-    for f in self.features:
-      poolings.append(tf.image.resize(f(feature_map), [128, 256]))
-    
-    feature_map_bins_concat = self.concat0(poolings)
-    print("F MAP " + str(feature_map_bins_concat))
-    output_num_classes_depth = self.conv0(feature_map_bins_concat)
-    output_upsampled = self.up1(output_num_classes_depth)
-    output_softmax = self.soft0(output_upsampled)
-    print("OUTPUT " + str(output_softmax))
-    
-    return output_softmax
+      feature_map = self.base_model(input)
+      #feature_map_upsampled = self.up0(feature_map)
+      
+      poolings = [feature_map]
+      for f in self.features:
+        poolings.append(tf.image.resize(f(feature_map), [32, 64]))
+      
+      feature_map_bins_concat = self.concat0(poolings)
+      # print("F MAP " + str(feature_map_bins_concat))
+      output_num_classes_depth = self.conv0(feature_map_bins_concat)
+      output_upsampled = self.up1(output_num_classes_depth)
+      output_softmax = self.soft0(output_upsampled)
+      # print("OUTPUT " + str(output_softmax))
+      
+      return output_softmax
+      
+train_ds = train_ds.batch(batch_size)
+val_ds = val_ds.batch(batch_size)
+#test_ds = test_ds.batch(batch_size)
 
 # tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
 class MeanIoU(tf.keras.metrics.MeanIoU):
     def __call__(self, y_true, y_pred, sample_weight=None):
-      # print("ACTUAL: " + str(y_true))
-      # print("PREDICTED: " + str(y_pred))
+      print("ACTUAL: " + str(y_true))
       y_pred = tf.argmax(y_pred, axis=-1) # do this because I think the predicted value is always one-hot vector I THINK
+      y_pred = tf.dtypes.cast(tf.expand_dims(y_pred,-1), tf.uint8)
+      print("PREDICTED: " + str(y_pred))
+
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
-num_classes = 30
-model = DummyModel(num_classes)
+num_classes = 34
+model = MyModel(num_classes)
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -131,10 +140,8 @@ model = DummyModel(num_classes)
 # should save checkpoints every epoch that can be restored
 # should be able to resume training from paused model
 def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_size=64, epochs=10, backup_path=None):
-  train_dataset = train_dataset.batch(batch_size)
-  val_dataset = val_dataset.batch(batch_size)
-
-  model.compile(optimizer="sgd",loss=loss_fn(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
+  sgd = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)
+  model.compile(optimizer=sgd,loss=loss_fn(), metrics=["accuracy", MeanIoU(num_classes)])
 
   if(backup_path is not None):
     # Assume "epochs" has been adapted to train as long as is left at the point of this checkpoint.
@@ -149,7 +156,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-# train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=2)
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
