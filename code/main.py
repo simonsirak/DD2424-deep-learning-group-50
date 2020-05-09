@@ -9,12 +9,12 @@ from load_data import DataLoader
 
 # nr of images
 size = 50062
-batch_size = 8
+batch_size = 4
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
 
-loader = DataLoader('cityscapes', '10%')
+loader = DataLoader('cityscapes', '5')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -23,7 +23,7 @@ loader = DataLoader('cityscapes', '10%')
 loader.normalizeAllData()
 
 train_ds = loader.getTrainData()
-#train_ds = train_ds.shuffle(1024)
+#train_ds = train_ds.shuffle(16)
 
 # 5006
 val_ds = loader.getValData()
@@ -31,19 +31,17 @@ val_ds = loader.getValData()
 
 #test_ds = loader.getTestData()
 
-class MyModel(tf.keras.Model):
+class DilatedResNet(tf.keras.Model):
+  def __init__(self, num_classes=34):
+    super(DilatedResNet, self).__init__(name="DilatedResNet")
 
-  def __init__(self, num_classes=30):
-    super(MyModel, self).__init__(name="baseWithPyramidPooling")
-
-    # base model
-    self.base_model = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
+    self.dilated_resnet = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
     
-    layer_3_conv2 = self.base_model.get_layer('conv4_block1_1_conv') # conv4_block1_1_conv (Conv2D)    (None, 64, 128, 256) 131328      conv3_block4_out[0][0]           
-    layer_3_downsample = self.base_model.get_layer('conv4_block1_0_conv') # conv4_block1_0_conv (Conv2D)    (None, 64, 128, 1024 525312      conv3_block4_out[0][0]           
+    layer_3_conv2 = self.dilated_resnet.get_layer('conv4_block1_1_conv') # conv4_block1_1_conv (Conv2D)    (None, 64, 128, 256) 131328      conv3_block4_out[0][0]           
+    layer_3_downsample = self.dilated_resnet.get_layer('conv4_block1_0_conv') # conv4_block1_0_conv (Conv2D)    (None, 64, 128, 1024 525312      conv3_block4_out[0][0]           
 
-    layer_4_conv2 = self.base_model.get_layer('conv5_block1_1_conv') # conv5_block1_1_conv (Conv2D)    (None, 32, 64, 512)  524800      conv4_block6_out[0][0]           
-    layer_4_downsample = self.base_model.get_layer('conv5_block1_0_conv') # conv5_block1_0_conv (Conv2D)    (None, 32, 64, 2048) 2099200     conv4_block6_out[0][0]           
+    layer_4_conv2 = self.dilated_resnet.get_layer('conv5_block1_1_conv') # conv5_block1_1_conv (Conv2D)    (None, 32, 64, 512)  524800      conv4_block6_out[0][0]           
+    layer_4_downsample = self.dilated_resnet.get_layer('conv5_block1_0_conv') # conv5_block1_0_conv (Conv2D)    (None, 32, 64, 2048) 2099200     conv4_block6_out[0][0]           
 
     layer_3_conv2.strides = (1,1)
     layer_3_conv2.padding = 'same'
@@ -57,12 +55,20 @@ class MyModel(tf.keras.Model):
 
     layer_4_downsample.strides = (1,1)
 
-    self.base_model = model_from_json(self.base_model.to_json())
+    self.dilated_resnet = model_from_json(self.dilated_resnet.to_json())
+    self.dilated_resnet.trainable = True
+    self.output_stride = 8
 
-    self.base_model.trainable = True
+  def call(self, input):
+    return self.dilated_resnet(input)
 
-    # upsample (just temporary)
-    self.up0 = tf.keras.layers.UpSampling2D(size=(4, 4), interpolation="bilinear")
+class PSPNet(tf.keras.Model):
+
+  def __init__(self, inp_dim, num_classes=34):
+    super(PSPNet, self).__init__(name="PSPNet")
+
+    # base model
+    self.base_model = DilatedResNet(num_classes)
 
     # pyramid pooling module
     # 
@@ -73,13 +79,13 @@ class MyModel(tf.keras.Model):
     self.features = []
 
     bins = [1,2,3,6]
-    inp_dim = (32,64)
+    self.reduced_dim = [inp_dim[0] // self.base_model.output_stride, inp_dim[1] // self.base_model.output_stride]
     for bin_ in bins:
-      strides = (inp_dim[0] // bin_, inp_dim[1] // bin_)
-      kernel_size = (inp_dim[0] - (bin_-1)*strides[0], inp_dim[1] - (bin_-1)*strides[1])
+      strides = (self.reduced_dim[0] // bin_, self.reduced_dim[1] // bin_)
+      kernel_size = (self.reduced_dim[0] - (bin_-1)*strides[0], self.reduced_dim[1] - (bin_-1)*strides[1])
       self.features.append(tf.keras.Sequential([
         tf.keras.layers.MaxPooling2D(kernel_size, strides=strides),
-        tf.keras.layers.Conv2D(512, (1, 1)),
+        tf.keras.layers.Conv2D(filters=512, kernel_size=(1, 1)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.ReLU()
       ]))
@@ -87,8 +93,10 @@ class MyModel(tf.keras.Model):
     # concatenation layer
     self.concat0 = tf.keras.layers.Concatenate()
 
-    # convolution layer (temporary)
-    self.conv0 = tf.keras.layers.Conv2D(num_classes, (1, 1), activation="relu")
+    # final convolution layer
+    self.conv0 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(3, 3), padding='same', use_bias=False)
+    self.bn0 = tf.keras.layers.BatchNormalization()
+    self.relu0 = tf.keras.layers.ReLU()
 
     # upsample layer (temporary)
     self.up1 = tf.keras.layers.UpSampling2D(size=(8, 8), interpolation="bilinear")
@@ -99,20 +107,18 @@ class MyModel(tf.keras.Model):
   def call(self, input):
     
       feature_map = self.base_model(input)
-      #feature_map_upsampled = self.up0(feature_map)
       
       poolings = [feature_map]
       for f in self.features:
-        poolings.append(tf.image.resize(f(feature_map), [32, 64]))
+        poolings.append(tf.image.resize(f(feature_map), self.reduced_dim))
       
       feature_map_bins_concat = self.concat0(poolings)
       # print("F MAP " + str(feature_map_bins_concat))
       output_num_classes_depth = self.conv0(feature_map_bins_concat)
       output_upsampled = self.up1(output_num_classes_depth)
-      output_softmax = self.soft0(output_upsampled)
       # print("OUTPUT " + str(output_softmax))
       
-      return output_softmax
+      return self.soft0(output_upsampled)
       
 train_ds = train_ds.batch(batch_size)
 val_ds = val_ds.batch(batch_size)
@@ -129,8 +135,45 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
 
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
+from IPython.display import clear_output
+import matplotlib as mpl
+#mpl.use('Agg')
+import matplotlib.pyplot as plt
+
+def display(display_list, name='before'):
+  plt.figure(figsize=(15, 15))
+
+  title = ['Input Image', 'True Mask', 'Predicted Mask']
+
+  for i in range(len(display_list)):
+    plt.subplot(1, len(display_list), i+1)
+    plt.title(title[i])
+    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]))
+    plt.axis('off')
+  plt.savefig(name)
+
+for image, mask in train_ds.take(1):
+  sample_image, sample_mask = image, mask
+display([sample_image[0], sample_mask[0]], 'before')
+
+def create_mask(pred_mask):
+  pred_mask = tf.argmax(pred_mask, axis=-1)
+  pred_mask = pred_mask[..., tf.newaxis]
+  return pred_mask[0]
+
+def show_predictions(dataset=None, num=1):
+  display([sample_image[0], sample_mask[0], 
+            create_mask(model.predict(sample_image))],'after')
+
+
+class DisplayCallback(tf.keras.callbacks.Callback):
+  def on_epoch_end(self, epoch, logs=None):
+    clear_output(wait=True)
+    show_predictions()
+    print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
+
 num_classes = 34
-model = MyModel(num_classes)
+model = PSPNet(inp_dim=(512,1024), num_classes=num_classes)
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -148,7 +191,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
     model.load_weights(backup_path)
 
   # y is part of x when x is a Dataset
-  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup{epoch:02d}of" + str(epochs))])
+  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup{epoch:02d}of" + str(epochs)), DisplayCallback()])
 
 
 ##########################
@@ -156,7 +199,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=2)
+#train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
@@ -186,3 +229,8 @@ train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy,
 # print(res)
 
 # The two above should yield similar results, +- randomness in training 
+# model = PSPNet((512,1024),num_classes)
+# sgd = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)
+# model.compile(optimizer=sgd,loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes)])
+# model.load_weights("backup03of10")
+# show_predictions()

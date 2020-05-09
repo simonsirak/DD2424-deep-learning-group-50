@@ -15,12 +15,17 @@ import tensorflow_datasets as tfds
 class DataLoader:
     def __init__(self, dataset_name='cityscapes', split='10%'):
         self.train_data, self.train_info = tfds.load(dataset_name, split='train[:' + split + ']', with_info=True)
-        self.val_data, self.val_info = tfds.load(dataset_name, split='validation[:' + split + ']', with_info=True)
-        self.test_data, self.test_info = tfds.load(dataset_name, split='test[:' + split + ']', with_info=True)
+        self.val_data, self.val_info = tfds.load(dataset_name, split='validation', with_info=True)
+        self.test_data, self.test_info = tfds.load(dataset_name, split='test', with_info=True)
         
     def normalizeAllData(self):
+        print(self.train_info)
         self.train_data = self.train_data.map(preprocess_input)
+
+        print(self.val_info)
         self.val_data = self.val_data.map(preprocess_input)
+
+        print(self.test_info)
         self.test_data = self.test_data.map(preprocess_input)
         
     def getAllData(self):
@@ -45,6 +50,6 @@ def preprocess_input(x):
     xx["segmentation_label"] = x["segmentation_label"]
     xx["image_left"] = tf.dtypes.cast(xx["image_left"], tf.float32)
     xx["image_left"] = tf.keras.applications.resnet.preprocess_input(xx["image_left"])
-    xx["image_left"] = tf.image.resize(xx["image_left"], (256,512), method='nearest')
-    xx["segmentation_label"] = tf.image.resize(xx["segmentation_label"], (256,512), method='nearest')
+    xx["image_left"] = tf.image.resize(xx["image_left"], (512,1024), method='nearest')
+    xx["segmentation_label"] = tf.image.resize(xx["segmentation_label"], (512,1024), method='nearest')
     return (xx["image_left"], xx["segmentation_label"])
