@@ -14,7 +14,7 @@ batch_size = 4
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
 
-loader = DataLoader('cityscapes', '5')
+loader = DataLoader('cityscapes', '10%')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -32,7 +32,7 @@ val_ds = loader.getValData()
 #test_ds = loader.getTestData()
 
 class DilatedResNet(tf.keras.Model):
-  def __init__(self, num_classes=34):
+  def __init__(self):
     super(DilatedResNet, self).__init__(name="DilatedResNet")
 
     self.dilated_resnet = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
@@ -62,13 +62,52 @@ class DilatedResNet(tf.keras.Model):
   def call(self, input):
     return self.dilated_resnet(input)
 
+# Perhaps we could just have an if-statement in the PSPNet instead
+class Baseline(tf.keras.Model):
+
+  def __init__(self, inp_dim):
+    super(PSPNet, self).__init__(name="PSPNet")
+
+    # base model
+    self.base_model = DilatedResNet()
+
+    inp_feature_maps = inp_dim[2]
+
+    # final convolution layer
+    # #features = 2*#inp_feature_maps because the 4 concatenated pooled maps add up to #inp_feature_maps in depth
+    self.conv0 = tf.keras.layers.Conv2D(filters=2*inp_feature_maps, kernel_size=(3, 3), padding='same', use_bias=False)
+    self.bn0 = tf.keras.layers.BatchNormalization()
+    self.relu0 = tf.keras.layers.ReLU()
+    self.conv1 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(1, 1))
+
+    # upsample layer (temporary)
+    self.up1 = tf.keras.layers.UpSampling2D(size=(8, 8), interpolation="bilinear")
+
+    # softmax
+    self.soft0 = tf.keras.layers.Softmax()
+
+  def call(self, input):
+    
+      feature_map = self.base_model(input)
+      
+      # print("F MAP " + str(feature_map_bins_concat))
+      output_num_classes_depth = self.conv0(feature_map)
+      x = self.bn0(output_num_classes_depth)
+      x = self.relu0(x)
+      x = self.conv1(x)
+      output_upsampled = self.up1(x)
+
+      # print("OUTPUT " + str(output_softmax))
+      
+      return self.soft0(output_upsampled)
+
 class PSPNet(tf.keras.Model):
 
   def __init__(self, inp_dim, num_classes=34):
     super(PSPNet, self).__init__(name="PSPNet")
 
     # base model
-    self.base_model = DilatedResNet(num_classes)
+    self.base_model = DilatedResNet()
 
     # pyramid pooling module
     # 
@@ -93,10 +132,13 @@ class PSPNet(tf.keras.Model):
     # concatenation layer
     self.concat0 = tf.keras.layers.Concatenate()
 
+    inp_feature_maps = inp_dim[2]
     # final convolution layer
-    self.conv0 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(3, 3), padding='same', use_bias=False)
+    # #features = 2*#inp_feature_maps because the 4 concatenated pooled maps add up to #inp_feature_maps in depth
+    self.conv0 = tf.keras.layers.Conv2D(filters=2*inp_feature_maps, kernel_size=(3, 3), padding='same', use_bias=False)
     self.bn0 = tf.keras.layers.BatchNormalization()
     self.relu0 = tf.keras.layers.ReLU()
+    self.conv1 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(1, 1))
 
     # upsample layer (temporary)
     self.up1 = tf.keras.layers.UpSampling2D(size=(8, 8), interpolation="bilinear")
@@ -115,7 +157,11 @@ class PSPNet(tf.keras.Model):
       feature_map_bins_concat = self.concat0(poolings)
       # print("F MAP " + str(feature_map_bins_concat))
       output_num_classes_depth = self.conv0(feature_map_bins_concat)
-      output_upsampled = self.up1(output_num_classes_depth)
+      x = self.bn0(output_num_classes_depth)
+      x = self.relu0(x)
+      x = self.conv1(x)
+      output_upsampled = self.up1(x)
+
       # print("OUTPUT " + str(output_softmax))
       
       return self.soft0(output_upsampled)
@@ -128,10 +174,10 @@ val_ds = val_ds.batch(batch_size)
 # https://github.com/tensorflow/tensorflow/issues/32875
 class MeanIoU(tf.keras.metrics.MeanIoU):
     def __call__(self, y_true, y_pred, sample_weight=None):
-      print("ACTUAL: " + str(y_true))
+      #print("ACTUAL: " + str(y_true))
       y_pred = tf.argmax(y_pred, axis=-1) # do this because I think the predicted value is always one-hot vector I THINK
       y_pred = tf.dtypes.cast(tf.expand_dims(y_pred,-1), tf.uint8)
-      print("PREDICTED: " + str(y_pred))
+      #print("PREDICTED: " + str(y_pred))
 
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
@@ -150,7 +196,7 @@ def display(display_list, name='before'):
     plt.title(title[i])
     plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]))
     plt.axis('off')
-  plt.savefig(name)
+  plt.show()
 
 for image, mask in train_ds.take(1):
   sample_image, sample_mask = image, mask
@@ -173,7 +219,7 @@ class DisplayCallback(tf.keras.callbacks.Callback):
     print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
 
 num_classes = 34
-model = PSPNet(inp_dim=(512,1024), num_classes=num_classes)
+model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes)
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -191,7 +237,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
     model.load_weights(backup_path)
 
   # y is part of x when x is a Dataset
-  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup{epoch:02d}of" + str(epochs)), DisplayCallback()])
+  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("NEWbackup{epoch:02d}of" + str(epochs)), DisplayCallback()])
 
 
 ##########################
@@ -199,7 +245,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-#train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
