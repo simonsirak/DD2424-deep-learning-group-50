@@ -4,7 +4,7 @@ import tensorflow_datasets as tfds
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
 from tensorflow.keras.models import model_from_json          
-
+from Display import DisplayCallback
 from load_data import DataLoader
 
 # nr of images
@@ -103,34 +103,35 @@ class Baseline(tf.keras.Model):
 
 class PSPNet(tf.keras.Model):
 
-  def __init__(self, inp_dim, num_classes=34):
+  def __init__(self, inp_dim, num_classes=34, use_ppm=False, bins=[1, 2, 3, 6]):
     super(PSPNet, self).__init__(name="PSPNet")
-
+    assert len(bins) == 4, "Length of bins should be equals 4"
     # base model
     self.base_model = DilatedResNet()
+    self.use_ppm = use_ppm # Decide whether to use PPM or not
 
     # pyramid pooling module
-    # 
+
     # Stride = (input_size//output_size)
     # Kernel size = input_size - (output_size-1)*stride
     # Padding = 0
+    if use_ppm:
+      self.features = []
 
-    self.features = []
+      bins = bins
+      self.reduced_dim = [inp_dim[0] // self.base_model.output_stride, inp_dim[1] // self.base_model.output_stride]
+      for bin_ in bins:
+        strides = (self.reduced_dim[0] // bin_, self.reduced_dim[1] // bin_)
+        kernel_size = (self.reduced_dim[0] - (bin_-1)*strides[0], self.reduced_dim[1] - (bin_-1)*strides[1])
+        self.features.append(tf.keras.Sequential([
+          tf.keras.layers.MaxPooling2D(kernel_size, strides=strides),
+          tf.keras.layers.Conv2D(filters=512, kernel_size=(1, 1)),
+          tf.keras.layers.BatchNormalization(),
+          tf.keras.layers.ReLU()
+        ]))
 
-    bins = [1,2,3,6]
-    self.reduced_dim = [inp_dim[0] // self.base_model.output_stride, inp_dim[1] // self.base_model.output_stride]
-    for bin_ in bins:
-      strides = (self.reduced_dim[0] // bin_, self.reduced_dim[1] // bin_)
-      kernel_size = (self.reduced_dim[0] - (bin_-1)*strides[0], self.reduced_dim[1] - (bin_-1)*strides[1])
-      self.features.append(tf.keras.Sequential([
-        tf.keras.layers.MaxPooling2D(kernel_size, strides=strides),
-        tf.keras.layers.Conv2D(filters=512, kernel_size=(1, 1)),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU()
-      ]))
-
-    # concatenation layer
-    self.concat0 = tf.keras.layers.Concatenate()
+      # concatenation layer
+      self.concat0 = tf.keras.layers.Concatenate()
 
     inp_feature_maps = inp_dim[2]
     # final convolution layer
@@ -147,17 +148,19 @@ class PSPNet(tf.keras.Model):
     self.soft0 = tf.keras.layers.Softmax()
 
   def call(self, input):
-    
-      feature_map = self.base_model(input)
+      # feature_map
+      x = self.base_model(input)
+
+      if self.use_ppm:
+        poolings = [x] # feature_map
+        for f in self.features:
+          poolings.append(tf.image.resize(f(x), self.reduced_dim)) # feature_map
       
-      poolings = [feature_map]
-      for f in self.features:
-        poolings.append(tf.image.resize(f(feature_map), self.reduced_dim))
-      
-      feature_map_bins_concat = self.concat0(poolings)
+        x = self.concat0(poolings) # feature_map_bins_concat
+
       # print("F MAP " + str(feature_map_bins_concat))
-      output_num_classes_depth = self.conv0(feature_map_bins_concat)
-      x = self.bn0(output_num_classes_depth)
+      x = self.conv0(x) # output_num_classes_depth | feature_map_bins_concat
+      x = self.bn0(x) # output_num_classes_depth
       x = self.relu0(x)
       x = self.conv1(x)
       output_upsampled = self.up1(x)
@@ -181,45 +184,9 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
 
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
-from IPython.display import clear_output
-import matplotlib as mpl
-#mpl.use('Agg')
-import matplotlib.pyplot as plt
-
-def display(display_list, name='before'):
-  plt.figure(figsize=(15, 15))
-
-  title = ['Input Image', 'True Mask', 'Predicted Mask']
-
-  for i in range(len(display_list)):
-    plt.subplot(1, len(display_list), i+1)
-    plt.title(title[i])
-    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]))
-    plt.axis('off')
-  plt.show()
-
-for image, mask in train_ds.take(1):
-  sample_image, sample_mask = image, mask
-display([sample_image[0], sample_mask[0]], 'before')
-
-def create_mask(pred_mask):
-  pred_mask = tf.argmax(pred_mask, axis=-1)
-  pred_mask = pred_mask[..., tf.newaxis]
-  return pred_mask[0]
-
-def show_predictions(dataset=None, num=1):
-  display([sample_image[0], sample_mask[0], 
-            create_mask(model.predict(sample_image))],'after')
-
-
-class DisplayCallback(tf.keras.callbacks.Callback):
-  def on_epoch_end(self, epoch, logs=None):
-    clear_output(wait=True)
-    show_predictions()
-    print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
 
 num_classes = 34
-model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes)
+model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
