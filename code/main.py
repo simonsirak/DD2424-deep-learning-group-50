@@ -9,12 +9,12 @@ from load_data import DataLoader
 
 # nr of images
 size = 50062
-batch_size = 4
+batch_size = 1
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
 
-loader = DataLoader('cityscapes', '10%')
+loader = DataLoader('cityscapes', '1')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -59,47 +59,8 @@ class DilatedResNet(tf.keras.Model):
     self.dilated_resnet.trainable = True
     self.output_stride = 8
 
-  def call(self, input):
-    return self.dilated_resnet(input)
-
-# Perhaps we could just have an if-statement in the PSPNet instead
-class Baseline(tf.keras.Model):
-
-  def __init__(self, inp_dim):
-    super(PSPNet, self).__init__(name="PSPNet")
-
-    # base model
-    self.base_model = DilatedResNet()
-
-    inp_feature_maps = inp_dim[2]
-
-    # final convolution layer
-    # #features = 2*#inp_feature_maps because the 4 concatenated pooled maps add up to #inp_feature_maps in depth
-    self.conv0 = tf.keras.layers.Conv2D(filters=2*inp_feature_maps, kernel_size=(3, 3), padding='same', use_bias=False)
-    self.bn0 = tf.keras.layers.BatchNormalization()
-    self.relu0 = tf.keras.layers.ReLU()
-    self.conv1 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(1, 1))
-
-    # upsample layer (temporary)
-    self.up1 = tf.keras.layers.UpSampling2D(size=(8, 8), interpolation="bilinear")
-
-    # softmax
-    self.soft0 = tf.keras.layers.Softmax()
-
-  def call(self, input):
-    
-      feature_map = self.base_model(input)
-      
-      # print("F MAP " + str(feature_map_bins_concat))
-      output_num_classes_depth = self.conv0(feature_map)
-      x = self.bn0(output_num_classes_depth)
-      x = self.relu0(x)
-      x = self.conv1(x)
-      output_upsampled = self.up1(x)
-
-      # print("OUTPUT " + str(output_softmax))
-      
-      return self.soft0(output_upsampled)
+  def call(self, input, training=False):
+    return self.dilated_resnet(input,training=training)
 
 class PSPNet(tf.keras.Model):
 
@@ -147,20 +108,20 @@ class PSPNet(tf.keras.Model):
     # softmax
     self.soft0 = tf.keras.layers.Softmax()
 
-  def call(self, input):
+  def call(self, input, training=False):
       # feature_map
-      x = self.base_model(input)
+      x = self.base_model(input, training=training)
 
       if self.use_ppm:
         poolings = [x] # feature_map
         for f in self.features:
-          poolings.append(tf.image.resize(f(x), self.reduced_dim)) # feature_map
+          poolings.append(tf.image.resize(f(x, training=training), self.reduced_dim)) # feature_map
       
         x = self.concat0(poolings) # feature_map_bins_concat
 
       # print("F MAP " + str(feature_map_bins_concat))
       x = self.conv0(x) # output_num_classes_depth | feature_map_bins_concat
-      x = self.bn0(x) # output_num_classes_depth
+      x = self.bn0(x,training=training) # output_num_classes_depth
       x = self.relu0(x)
       x = self.conv1(x)
       output_upsampled = self.up1(x)
@@ -204,7 +165,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
     model.load_weights(backup_path)
 
   # y is part of x when x is a Dataset
-  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("NEWbackup{epoch:02d}of" + str(epochs)), DisplayCallback()])
+  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[DisplayCallback(model, train_ds)])
 
 
 ##########################
@@ -212,7 +173,10 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=2)
+
+# cb.show_predictions(dataset=train_ds, num=1)
+print(model.predict(train_ds))
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!

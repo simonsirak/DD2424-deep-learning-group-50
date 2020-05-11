@@ -15,7 +15,7 @@ import tensorflow_datasets as tfds
 class DataLoader:
     def __init__(self, dataset_name='cityscapes', split='10%'):
         self.train_data, self.train_info = tfds.load(dataset_name, split='train[:' + split + ']', with_info=True)
-        self.val_data, self.val_info = tfds.load(dataset_name, split='validation', with_info=True)
+        self.val_data, self.val_info = tfds.load(dataset_name, split='validation[:1]', with_info=True)
         self.test_data, self.test_info = tfds.load(dataset_name, split='test', with_info=True)
         
     def normalizeAllData(self):
