@@ -14,7 +14,7 @@ batch_size = 1
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
 
-loader = DataLoader('cityscapes', '1')
+loader = DataLoader('oxford_iiit_pet', '1')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -26,10 +26,8 @@ train_ds = loader.getTrainData()
 #train_ds = train_ds.shuffle(16)
 
 # 5006
-val_ds = loader.getValData()
-#val_ds = val_ds.shuffle(1024)
-
-#test_ds = loader.getTestData()
+test_ds = loader.getTestData()
+#test_ds = test_ds.shuffle(1024)
 
 class DilatedResNet(tf.keras.Model):
   def __init__(self):
@@ -131,8 +129,7 @@ class PSPNet(tf.keras.Model):
       return self.soft0(output_upsampled)
       
 train_ds = train_ds.batch(batch_size)
-val_ds = val_ds.batch(batch_size)
-#test_ds = test_ds.batch(batch_size)
+test_ds = test_ds.batch(batch_size)
 
 # tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
@@ -146,8 +143,8 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
 
-num_classes = 34
-model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
+num_classes = 4
+model = PSPNet(inp_dim=(512,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -173,7 +170,7 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=2)
+train_model(model, train_ds, test_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=2)
 
 # cb.show_predictions(dataset=train_ds, num=1)
 print(model.predict(train_ds))
