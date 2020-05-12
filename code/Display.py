@@ -29,19 +29,18 @@ class DisplayCallback(tf.keras.callbacks.Callback):
   # display([sample_image[0], sample_mask[0]], 'before')
 
   def create_mask(self, pred_mask):
-    print(tf.math.reduce_max(pred_mask, axis=-1))
+    #print(tf.math.reduce_max(pred_mask, axis=-1))
     pred_mask = tf.argmax(pred_mask, axis=-1)
-    print(pred_mask)
-    pred_mask = tf.dtypes.cast(tf.expand_dims(pred_mask,-1), tf.uint64)
+    pred_mask = tf.dtypes.cast(tf.expand_dims(pred_mask,-1), tf.uint8)
     #print(pred_mask.shape)
     #print(pred_mask)
+    print("PRED: " + str(pred_mask[0]))
     return pred_mask[0]
 
-  def show_predictions(self, dataset=None, num=1):
+  def show_predictions(self, dataset=None, num=1, training=False):
     for image, mask in self.dataset.take(1):
-      self.model.evaluate(self.dataset)
-      pred_mask = self.model(image, training=False)
-      
+      pred_mask = self.model(image, training=training)
+      print("REAL: " + str(mask))
       # print(image)
       # print(pred_mask.shape)
       # print(mask.shape)
@@ -49,6 +48,5 @@ class DisplayCallback(tf.keras.callbacks.Callback):
 
   def on_epoch_end(self, epoch, logs=None):
     clear_output(wait=True)
-    if epoch % 2 == 0:
-      self.show_predictions()
+    self.show_predictions(training=True)
     print ('\nSample Prediction after epoch {}\n'.format(epoch+1))

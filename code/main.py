@@ -9,12 +9,12 @@ from load_data import DataLoader
 
 # nr of images
 size = 50062
-batch_size = 1
+batch_size = 4
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
 # 45056
 
-loader = DataLoader('oxford_iiit_pet', '1')
+loader = DataLoader('cityscapes', '10%')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -143,8 +143,8 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
 
-num_classes = 4
-model = PSPNet(inp_dim=(512,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
+num_classes = 34
+model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -170,10 +170,10 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, test_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=2)
+train_model(model, train_ds, test_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=50)
 
 # cb.show_predictions(dataset=train_ds, num=1)
-print(model.predict(train_ds))
+# print(model.predict(train_ds))
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
