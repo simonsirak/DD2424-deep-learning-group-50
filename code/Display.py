@@ -46,7 +46,7 @@ class DisplayCallback(tf.keras.callbacks.Callback):
     # print("PRED: " + str(pred_mask[0]))
     return pred_mask[0]
 
-  def show_predictions(self, dataset=None, num=1, training=False, name='result', epoch=1):
+  def show_predictions(self, dataset=None, num=1, training=False, name='result', epoch=-1):
     for image, mask in self.dataset.take(1):
       pred_mask = self.model(image, training=training)
       # print("REAL: " + str(mask))
@@ -54,11 +54,10 @@ class DisplayCallback(tf.keras.callbacks.Callback):
       # print(pred_mask.shape)
       # print(mask.shape)
 
-      # - if not training, print input, true and predicted.
-      # if training:
+      # - if epoch == -1, output all three
       # - the first epoch should only show input image and true mask
       # - otherwise, show true and predicted
-      if(training == False):
+      if(epoch == -1):
         self.display([('Input Image',image[0]), ('True Mask', mask[0]), ('Predicted Mask', self.create_mask(pred_mask))], name=name)
       elif(epoch == 1):
         self.display([('Input Image',image[0]), ('True Mask', mask[0])], name=name, epoch=epoch)
@@ -71,6 +70,6 @@ class DisplayCallback(tf.keras.callbacks.Callback):
     # show prediction every 5th epoch, first image has only image and label,
     # all remaining have label and prediction
     if(epoch == 0 or (epoch+1) % 5 == 0):
-      self.show_predictions(training=True, name="img_" + str(epoch+1), epoch=epoch+1)
+      self.show_predictions(training=False, name="img_" + str(epoch+1), epoch=epoch+1)
 
     # print ('\nSample Prediction after epoch {}\n'.format(epoch+1))

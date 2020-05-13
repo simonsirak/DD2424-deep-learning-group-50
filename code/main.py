@@ -21,7 +21,7 @@ loader = DataLoader('cityscapes', '50%')
 loader.normalizeAllData()
 
 train_ds = loader.getTrainData()
-train_ds = train_ds.shuffle(16)
+train_ds = train_ds.shuffle(512)
 
 val_ds = loader.getValData()
 
@@ -95,6 +95,7 @@ class PSPNet(tf.keras.Model):
     self.conv0 = tf.keras.layers.Conv2D(filters=2*inp_feature_maps, kernel_size=(3, 3), padding='same', use_bias=False)
     self.bn0 = tf.keras.layers.BatchNormalization()
     self.relu0 = tf.keras.layers.ReLU()
+    self.do = tf.keras.layers.Dropout(rate=0.1)
     self.conv1 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(1, 1))
 
     # upsample layer (temporary)
@@ -118,6 +119,7 @@ class PSPNet(tf.keras.Model):
       x = self.conv0(x) # output_num_classes_depth | feature_map_bins_concat
       x = self.bn0(x,training=training) # output_num_classes_depth
       x = self.relu0(x)
+      x = self.do(x,training=training)
       x = self.conv1(x)
       output_upsampled = self.up1(x)
 
