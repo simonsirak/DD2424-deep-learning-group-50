@@ -9,12 +9,10 @@ from load_data import DataLoader
 
 # nr of images
 size = 50062
-batch_size = 4
+batch_size = 8
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
-# 45056
-
-loader = DataLoader('cityscapes', '10%')
+loader = DataLoader('cityscapes', '50%')
 
 # normalize all the data before usage
 # this includes casting the images to float32
@@ -23,13 +21,12 @@ loader = DataLoader('cityscapes', '10%')
 loader.normalizeAllData()
 
 train_ds = loader.getTrainData()
-#train_ds = train_ds.shuffle(16)
+train_ds = train_ds.shuffle(16)
 
-# 5006
-test_ds = loader.getTestData()
-#test_ds = test_ds.shuffle(1024)
+val_ds = loader.getValData()
 
 class DilatedResNet(tf.keras.Model):
+
   def __init__(self):
     super(DilatedResNet, self).__init__(name="DilatedResNet")
 
@@ -129,7 +126,7 @@ class PSPNet(tf.keras.Model):
       return self.soft0(output_upsampled)
       
 train_ds = train_ds.batch(batch_size)
-test_ds = test_ds.batch(batch_size)
+val_ds = val_ds.batch(batch_size)
 
 # tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
@@ -162,15 +159,15 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
     model.load_weights(backup_path)
 
   # y is part of x when x is a Dataset
-  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[DisplayCallback(model, train_ds)])
-
+  # verbose=2 gives 1 line per epcoh, which is good when logging to a file
+  model.fit(x=train_dataset, verbose=1, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup" + str(epochs)), DisplayCallback(model, train_dataset, saveimg=True)])
 
 ##########################
 # PLAYING AROUND/TESTING #
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, test_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=50)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=60)
 
 # cb.show_predictions(dataset=train_ds, num=1)
 # print(model.predict(train_ds))
