@@ -8,7 +8,6 @@ from Display import DisplayCallback
 from load_data import DataLoader
 
 # nr of images
-size = 50062
 batch_size = 8
 
 # Load dataset and split it how you want! You need to batch here if you use the Dataset API
@@ -24,6 +23,9 @@ train_ds = loader.getTrainData()
 train_ds = train_ds.shuffle(512)
 
 val_ds = loader.getValData()
+
+train_ds = train_ds.batch(batch_size).prefetch(1)
+val_ds = val_ds.batch(batch_size).prefetch(1)
 
 class DilatedResNet(tf.keras.Model):
 
@@ -126,9 +128,6 @@ class PSPNet(tf.keras.Model):
       # print("OUTPUT " + str(output_softmax))
       
       return self.soft0(output_upsampled)
-      
-train_ds = train_ds.batch(batch_size)
-val_ds = val_ds.batch(batch_size)
 
 # tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
@@ -143,7 +142,7 @@ class MeanIoU(tf.keras.metrics.MeanIoU):
 
 
 num_classes = 34
-model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
+model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=False, bins=[1, 2, 3, 6])
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
