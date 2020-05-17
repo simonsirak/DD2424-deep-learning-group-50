@@ -3,67 +3,138 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
-
+from tensorflow.keras.models import model_from_json          
+from Display import DisplayCallback
 from load_data import DataLoader
+import numpy as np 
 
-# nr of images
-size = 50062
-batch_size = 128
+# Create dataset loader
+loader = DataLoader('cityscapes', '1', batch_size=1)
 
-# Load dataset and split it how you want! You need to batch here if you use the Dataset API
-# 45056
+# Prepare all the data before usage. This includes:
+# - Casting the images to float32.
+# - Normalizing all the data according to the normalization strategy for ResNet50. 
+# - Applying a random flip to the training data every time it is encountered.
+# - Batching the data.
+# - Prefetching 1 batch to improve the data throughput.
 
-loader = DataLoader('cifar10', '90%')
+loader.prepareDatasets()
 
-# normalize all the data before usage
-# this includes casting the images to float32
-# as well as using the preprocess_input function from tf.keras.applications.resnet50
-# (removed casting and normalizing from the call function)
-loader.normalizeAllData()
-
+# Load the datasets
 train_ds = loader.getTrainData()
-train_ds = train_ds.shuffle(1024)
-
-# 5006
 val_ds = loader.getValData()
-val_ds = val_ds.shuffle(1024)
 
-# Create model class yourself if you want
-class DummyModel(tf.keras.Model):
-  def __init__(self, lambda_, num_classes=10):
-    super(DummyModel, self).__init__(name="assignment_1")
-    self.base_model = tf.keras.applications.resnet50.ResNet50(weights="imagenet", include_top=False)
-    self.base_model.trainable = False
-    self.dense0 = tf.keras.layers.Flatten()
+class DilatedResNet(tf.keras.Model):
+
+  def __init__(self):
+    super(DilatedResNet, self).__init__(name="DilatedResNet")
+
+    self.dilated_resnet = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
+    
+    layer_3_conv2 = self.dilated_resnet.get_layer('conv4_block1_1_conv') # conv4_block1_1_conv (Conv2D)    (None, 64, 128, 256) 131328      conv3_block4_out[0][0]           
+    layer_3_downsample = self.dilated_resnet.get_layer('conv4_block1_0_conv') # conv4_block1_0_conv (Conv2D)    (None, 64, 128, 1024 525312      conv3_block4_out[0][0]           
+
+    layer_4_conv2 = self.dilated_resnet.get_layer('conv5_block1_1_conv') # conv5_block1_1_conv (Conv2D)    (None, 32, 64, 512)  524800      conv4_block6_out[0][0]           
+    layer_4_downsample = self.dilated_resnet.get_layer('conv5_block1_0_conv') # conv5_block1_0_conv (Conv2D)    (None, 32, 64, 2048) 2099200     conv4_block6_out[0][0]           
+
+    layer_3_conv2.strides = (1,1)
+    layer_3_conv2.padding = 'same'
+    layer_3_conv2.dilation_rate = (2,2)
+
+    layer_3_downsample.strides = (1,1)
+
+    layer_4_conv2.strides = (1,1)
+    layer_4_conv2.padding = 'same'
+    layer_4_conv2.dilation_rate = (4,4)
+
+    layer_4_downsample.strides = (1,1)
+
+    self.dilated_resnet = model_from_json(self.dilated_resnet.to_json())
+    self.dilated_resnet.trainable = True
+    self.output_stride = 8
+
+  def call(self, input, training=False):
+    return self.dilated_resnet(input,training=training)
+
+class PSPNet(tf.keras.Model):
+
+  def __init__(self, feature_dim, num_classes=34, use_ppm=False, bins=[1, 2, 3, 6]):
+    super(PSPNet, self).__init__(name="PSPNet")
+    assert len(bins) == 4, "Length of bins should be equals 4"
+    # base model
+    self.base_model = DilatedResNet()
+    self.use_ppm = use_ppm # Decide whether to use PPM or not
+
+    # pyramid pooling module
+
+    # Stride = (input_size//output_size)
+    # Kernel size = input_size - (output_size-1)*stride
+    # Padding = 0
+    if use_ppm:
+      self.features = []
+
+      bins = bins
+      self.reduced_dim = [feature_dim[0] // self.base_model.output_stride, feature_dim[1] // self.base_model.output_stride]
+      for bin_ in bins:
+        strides = (self.reduced_dim[0] // bin_, self.reduced_dim[1] // bin_)
+        kernel_size = (self.reduced_dim[0] - (bin_-1)*strides[0], self.reduced_dim[1] - (bin_-1)*strides[1])
+        self.features.append(tf.keras.Sequential([
+          tf.keras.layers.MaxPooling2D(kernel_size, strides=strides),
+          tf.keras.layers.Conv2D(filters=512, kernel_size=(1, 1)),
+          tf.keras.layers.BatchNormalization(),
+          tf.keras.layers.ReLU()
+        ]))
+
+      # concatenation layer
+      self.concat0 = tf.keras.layers.Concatenate()
+
+    feature_map_channels = feature_dim[2]
+    # final convolution layer
+    # #features = 2*#inp_feature_maps because the 4 concatenated pooled maps add up to #inp_feature_maps in depth
+    self.conv0 = tf.keras.layers.Conv2D(filters=2*feature_map_channels, kernel_size=(3, 3), padding='same', use_bias=False)
     self.bn0 = tf.keras.layers.BatchNormalization()
-    self.dense1 = tf.keras.layers.Dense(50, activation="relu", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
-    self.bn1 = tf.keras.layers.BatchNormalization()
-    self.dense2 = tf.keras.layers.Dense(50, activation="relu", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
-    self.bn2 = tf.keras.layers.BatchNormalization()
-    self.dense3 = tf.keras.layers.Dense(num_classes, activation="softmax", kernel_initializer=tf.keras.initializers.he_normal(), bias_initializer=tf.random_normal_initializer(mean=0.5, stddev=0.05), kernel_regularizer=tf.keras.regularizers.l2(lambda_))
+    self.relu0 = tf.keras.layers.ReLU()
+    self.do = tf.keras.layers.Dropout(rate=0.5)
+    self.conv1 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(1, 1))
 
-  def call(self, inputs):
-    x = self.base_model(inputs)
-    x = self.dense0(x)
-    x = self.bn0(x)
-    x = self.dense1(x)
-    x = self.bn1(x)
-    x = self.dense2(x)
-    x = self.bn2(x)
-    #print(x)
-    return self.dense3(x)
+    # upsample layer (temporary)
+    self.up1 = tf.keras.layers.UpSampling2D(size=(8, 8), interpolation="bilinear")
 
-# tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
+    # softmax
+    self.soft0 = tf.keras.layers.Softmax()
+
+  def call(self, input, training=False):
+      # feature_map
+      x = self.base_model(input, training=training)
+
+      if self.use_ppm:
+        poolings = [x] # feature_map
+        for f in self.features:
+          poolings.append(tf.image.resize(f(x, training=training), self.reduced_dim)) # feature_map
+      
+        x = self.concat0(poolings) # feature_map_bins_concat
+
+      x = self.conv0(x) # output_num_classes_depth | feature_map_bins_concat
+      x = self.bn0(x,training=training) # output_num_classes_depth
+      x = self.relu0(x)
+      x = self.do(x,training=training)
+      x = self.conv1(x)
+      output_upsampled = self.up1(x)
+      
+      return self.soft0(output_upsampled)
+
+# Tensorflow 2.1 cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
 class MeanIoU(tf.keras.metrics.MeanIoU):
     def __call__(self, y_true, y_pred, sample_weight=None):
-      # print("ACTUAL: " + str(y_true))
-      # print("PREDICTED: " + str(y_pred))
-      y_pred = tf.argmax(y_pred, axis=-1) # do this because I think the predicted value is always one-hot vector I THINK
+      y_pred = tf.argmax(y_pred, axis=-1) # The predicted value is a one-hot vector, so this needs to be converted
+      y_pred = tf.dtypes.cast(tf.expand_dims(y_pred,-1), tf.uint8)
+
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
-num_classes = 10
-model = DummyModel(0.005, num_classes)
+# Define model
+num_classes = 34
+model = PSPNet(feature_dim=(256,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -72,52 +143,104 @@ model = DummyModel(0.005, num_classes)
 # should be able to plot measurements over time, e.g loss/cost and accuracy
 # should save checkpoints every epoch that can be restored
 # should be able to resume training from paused model
-def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_size=64, epochs=10, backup_path=None):
-  train_dataset = train_dataset.batch(batch_size)
-  val_dataset = val_dataset.batch(batch_size)
-
-  model.compile(optimizer="sgd",loss=loss_fn(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
+def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, epochs=10, backup_path=None):
+  sgd = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)
+  model.compile(optimizer=sgd,loss=loss_fn(), weighted_metrics=["accuracy", MeanIoU(num_classes)])
 
   if(backup_path is not None):
     # Assume "epochs" has been adapted to train as long as is left at the point of this checkpoint.
     model.load_weights(backup_path)
 
   # y is part of x when x is a Dataset
-  model.fit(x=train_dataset, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup{epoch:02d}of" + str(epochs))])
-
+  # verbose=2 gives 1 line per epcoh, which is good when logging to a file
+  model.fit(x=train_dataset, verbose=1, epochs=epochs, validation_data=val_dataset, callbacks=[TensorBoard(), ModelCheckpoint("backup" + str(epochs)), DisplayCallback(model, train_dataset, saveimg=True)])
 
 ##########################
 # PLAYING AROUND/TESTING #
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=10)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, epochs=6)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# cb.show_predictions(dataset=train_ds, num=1)
+# print(model.predict(train_ds))
 
 # load test data for evaluation
 # Either fitting or evaluation needs to be done before summary can be used, compiling is not enough!
 # This is because custom models are defined through their call()-function, which is run when you use 
 # the model.
-test_ds = loader.getTestData()
-test_ds = test_ds.shuffle(1024)
-test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
+# test_ds = loader.getTestData()
+# test_ds = test_ds.shuffle(1024)
+# test_ds = test_ds.batch(batch_size) # test data apparently needs to be batched with same size as training data
 
-# load saved model (compiling needs to be done before loading weights for some reason, don't quite understand why)
-halfway = DummyModel(0.005, num_classes)
+# # load saved model (compiling needs to be done before loading weights for some reason, don't quite understand why)
+# halfway = DummyModel(0.005, num_classes)
 
-# model that resumed from halfway
-train_model(halfway, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=5, backup_path="backup05of10")
-res = halfway.evaluate(test_ds)
-print()
-print(" HALFWAY->FULL RESULTS ")
-print(res)
+# # model that resumed from halfway
+# train_model(halfway, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=5, backup_path="backup05of10")
+# res = halfway.evaluate(test_ds)
+# print()
+# print(" HALFWAY->FULL RESULTS ")
+# print(res)
 
-# model that kept going from beginning to end, the halfway point came from the same training session as this model
-full = DummyModel(0.005, num_classes)
-full.compile(optimizer="sgd",loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
-full.load_weights("backup10of10")
-res = full.evaluate(test_ds)
-print()
-print(" BEGINNING->FULL RESULTS ")
-print(res)
+# # model that kept going from beginning to end, the halfway point came from the same training session as this model
+# full = DummyModel(0.005, num_classes)
+# full.compile(optimizer="sgd",loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes=num_classes)])
+# full.load_weights("backup10of10")
+# res = full.evaluate(test_ds)
+# print()
+# print(" BEGINNING->FULL RESULTS ")
+# print(res)
 
 # The two above should yield similar results, +- randomness in training 
+# model = PSPNet((512,1024),num_classes)
+# sgd = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)
+# model.compile(optimizer=sgd,loss=SparseCategoricalCrossentropy(), metrics=["accuracy", MeanIoU(num_classes)])
+# model.load_weights("backup03of10")
+# show_predictions()

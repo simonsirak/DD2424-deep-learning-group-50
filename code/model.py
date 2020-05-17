@@ -5,8 +5,9 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 
 from load_data import DataLoader
+from tensorflow.keras.models import model_from_json          
 
-loader = DataLoader(dataset_name='cityscapes', split="100")
+loader = DataLoader(dataset_name='cityscapes', split="20%")
 loader.normalizeAllData()
 
 train_ds = loader.getTrainData()
@@ -23,6 +24,27 @@ class MyModel(tf.keras.Model):
 
         # base model
         self.base_model = tf.keras.applications.resnet.ResNet50(weights="imagenet", include_top=False)
+        
+        layer_3_conv2 = self.base_model.get_layer('conv4_block1_1_conv') # conv4_block1_1_conv (Conv2D)    (None, 64, 128, 256) 131328      conv3_block4_out[0][0]           
+        layer_3_downsample = self.base_model.get_layer('conv4_block1_0_conv') # conv4_block1_0_conv (Conv2D)    (None, 64, 128, 1024 525312      conv3_block4_out[0][0]           
+
+        layer_4_conv2 = self.base_model.get_layer('conv5_block1_1_conv') # conv5_block1_1_conv (Conv2D)    (None, 32, 64, 512)  524800      conv4_block6_out[0][0]           
+        layer_4_downsample = self.base_model.get_layer('conv5_block1_0_conv') # conv5_block1_0_conv (Conv2D)    (None, 32, 64, 2048) 2099200     conv4_block6_out[0][0]           
+
+        layer_3_conv2.strides = (1,1)
+        layer_3_conv2.padding = 'same'
+        layer_3_conv2.dilation_rate = (2,2)
+
+        layer_3_downsample.strides = (1,1)
+
+        layer_4_conv2.strides = (1,1)
+        layer_4_conv2.padding = 'same'
+        layer_4_conv2.dilation_rate = (4,4)
+
+        layer_4_downsample.strides = (1,1)
+
+        self.base_model = model_from_json(self.base_model.to_json())
+
         self.base_model.trainable = True
 
         # upsample (just temporary)
@@ -37,7 +59,7 @@ class MyModel(tf.keras.Model):
         self.features = []
 
         bins = [1,2,3,6]
-        inp_dim = (128,256)
+        inp_dim = (64,128)
         for bin_ in bins:
           strides = (inp_dim[0] // bin_, inp_dim[1] // bin_)
           kernel_size = (inp_dim[0] - (bin_-1)*strides[0], inp_dim[1] - (bin_-1)*strides[1])
@@ -63,11 +85,11 @@ class MyModel(tf.keras.Model):
     def call(self, input):
       
         feature_map = self.base_model(input)
-        feature_map_upsampled = self.up0(feature_map)
+        #feature_map_upsampled = self.up0(feature_map)
         
-        poolings = [feature_map_upsampled]
+        poolings = [feature_map]
         for f in self.features:
-          poolings.append(tf.image.resize(f(feature_map_upsampled), [128, 256]))
+          poolings.append(tf.image.resize(f(feature_map), [64, 128]))
         
         feature_map_bins_concat = self.concat0(poolings)
         print("F MAP " + str(feature_map_bins_concat))
@@ -79,10 +101,15 @@ class MyModel(tf.keras.Model):
         return output_softmax
       
 model = MyModel(30)
-train_ds = train_ds.batch(1)
-val_ds = val_ds.batch(1)
+train_ds = train_ds.batch(4)
+val_ds = val_ds.batch(4)
+test_ds = test_ds.batch(4)
 
-model.compile(optimizer="SGD", loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False), metrics=["accuracy"])
+sgd = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)
+
+model.compile(optimizer=sgd, loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), metrics=["accuracy"])                            
+
 #model.build(input_shape=(None,1024,2048,3))
-model.fit(x=train_ds, validation_data=val_ds, epochs=3)                                 
+model.fit(x=train_ds, validation_data=val_ds, epochs=3)  
 model.summary(line_length=90)
+model.evaluate(test_ds)   
