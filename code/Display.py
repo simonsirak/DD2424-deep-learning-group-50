@@ -70,6 +70,9 @@ class DisplayCallback(tf.keras.callbacks.Callback):
     # show prediction every 5th epoch, first image has only image and label,
     # all remaining have label and prediction
     if(epoch == 0 or (epoch+1) % 5 == 0):
+      # NOTE: Set training=True if you intend to do some kind of overfitting-test, 
+      # since these tests do not have enough data/batches to compute good batch 
+      # normalization means and standard deviations.
       self.show_predictions(training=False, name="img_" + str(epoch+1), epoch=epoch+1)
 
     # print ('\nSample Prediction after epoch {}\n'.format(epoch+1))

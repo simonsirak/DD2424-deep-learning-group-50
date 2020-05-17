@@ -6,26 +6,23 @@ from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
 from tensorflow.keras.models import model_from_json          
 from Display import DisplayCallback
 from load_data import DataLoader
+import numpy as np 
 
-# nr of images
-batch_size = 8
+# Create dataset loader
+loader = DataLoader('cityscapes', '1', batch_size=1)
 
-# Load dataset and split it how you want! You need to batch here if you use the Dataset API
-loader = DataLoader('cityscapes', '50%')
+# Prepare all the data before usage. This includes:
+# - Casting the images to float32.
+# - Normalizing all the data according to the normalization strategy for ResNet50. 
+# - Applying a random flip to the training data every time it is encountered.
+# - Batching the data.
+# - Prefetching 1 batch to improve the data throughput.
 
-# normalize all the data before usage
-# this includes casting the images to float32
-# as well as using the preprocess_input function from tf.keras.applications.resnet50
-# (removed casting and normalizing from the call function)
-loader.normalizeAllData()
+loader.prepareDatasets()
 
+# Load the datasets
 train_ds = loader.getTrainData()
-train_ds = train_ds.shuffle(512)
-
 val_ds = loader.getValData()
-
-train_ds = train_ds.batch(batch_size).prefetch(1)
-val_ds = val_ds.batch(batch_size).prefetch(1)
 
 class DilatedResNet(tf.keras.Model):
 
@@ -61,7 +58,7 @@ class DilatedResNet(tf.keras.Model):
 
 class PSPNet(tf.keras.Model):
 
-  def __init__(self, inp_dim, num_classes=34, use_ppm=False, bins=[1, 2, 3, 6]):
+  def __init__(self, feature_dim, num_classes=34, use_ppm=False, bins=[1, 2, 3, 6]):
     super(PSPNet, self).__init__(name="PSPNet")
     assert len(bins) == 4, "Length of bins should be equals 4"
     # base model
@@ -77,7 +74,7 @@ class PSPNet(tf.keras.Model):
       self.features = []
 
       bins = bins
-      self.reduced_dim = [inp_dim[0] // self.base_model.output_stride, inp_dim[1] // self.base_model.output_stride]
+      self.reduced_dim = [feature_dim[0] // self.base_model.output_stride, feature_dim[1] // self.base_model.output_stride]
       for bin_ in bins:
         strides = (self.reduced_dim[0] // bin_, self.reduced_dim[1] // bin_)
         kernel_size = (self.reduced_dim[0] - (bin_-1)*strides[0], self.reduced_dim[1] - (bin_-1)*strides[1])
@@ -91,13 +88,13 @@ class PSPNet(tf.keras.Model):
       # concatenation layer
       self.concat0 = tf.keras.layers.Concatenate()
 
-    inp_feature_maps = inp_dim[2]
+    feature_map_channels = feature_dim[2]
     # final convolution layer
     # #features = 2*#inp_feature_maps because the 4 concatenated pooled maps add up to #inp_feature_maps in depth
-    self.conv0 = tf.keras.layers.Conv2D(filters=2*inp_feature_maps, kernel_size=(3, 3), padding='same', use_bias=False)
+    self.conv0 = tf.keras.layers.Conv2D(filters=2*feature_map_channels, kernel_size=(3, 3), padding='same', use_bias=False)
     self.bn0 = tf.keras.layers.BatchNormalization()
     self.relu0 = tf.keras.layers.ReLU()
-    self.do = tf.keras.layers.Dropout(rate=0.1)
+    self.do = tf.keras.layers.Dropout(rate=0.5)
     self.conv1 = tf.keras.layers.Conv2D(filters=num_classes, kernel_size=(1, 1))
 
     # upsample layer (temporary)
@@ -117,32 +114,27 @@ class PSPNet(tf.keras.Model):
       
         x = self.concat0(poolings) # feature_map_bins_concat
 
-      # print("F MAP " + str(feature_map_bins_concat))
       x = self.conv0(x) # output_num_classes_depth | feature_map_bins_concat
       x = self.bn0(x,training=training) # output_num_classes_depth
       x = self.relu0(x)
       x = self.do(x,training=training)
       x = self.conv1(x)
       output_upsampled = self.up1(x)
-
-      # print("OUTPUT " + str(output_softmax))
       
       return self.soft0(output_upsampled)
 
-# tensorflow is trash and cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
+# Tensorflow 2.1 cannot work with SparseCategoricalCrossEntropy+MeanIoU, see this issue:
 # https://github.com/tensorflow/tensorflow/issues/32875
 class MeanIoU(tf.keras.metrics.MeanIoU):
     def __call__(self, y_true, y_pred, sample_weight=None):
-      #print("ACTUAL: " + str(y_true))
-      y_pred = tf.argmax(y_pred, axis=-1) # do this because I think the predicted value is always one-hot vector I THINK
+      y_pred = tf.argmax(y_pred, axis=-1) # The predicted value is a one-hot vector, so this needs to be converted
       y_pred = tf.dtypes.cast(tf.expand_dims(y_pred,-1), tf.uint8)
-      #print("PREDICTED: " + str(y_pred))
 
       return super().__call__(y_true, y_pred, sample_weight=sample_weight)
 
-
+# Define model
 num_classes = 34
-model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=False, bins=[1, 2, 3, 6])
+model = PSPNet(feature_dim=(256,512,2048), num_classes=num_classes, use_ppm=True, bins=[1, 2, 3, 6])
 
 # TensorBoard and ModelCheckpoint callbacks would be awesome for visualization and saving models!
 # Should plot loss and mIoU initially.
@@ -151,9 +143,9 @@ model = PSPNet(inp_dim=(256,512,2048), num_classes=num_classes, use_ppm=False, b
 # should be able to plot measurements over time, e.g loss/cost and accuracy
 # should save checkpoints every epoch that can be restored
 # should be able to resume training from paused model
-def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_size=64, epochs=10, backup_path=None):
+def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, epochs=10, backup_path=None):
   sgd = tf.keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)
-  model.compile(optimizer=sgd,loss=loss_fn(), metrics=["accuracy", MeanIoU(num_classes)])
+  model.compile(optimizer=sgd,loss=loss_fn(), weighted_metrics=["accuracy", MeanIoU(num_classes)])
 
   if(backup_path is not None):
     # Assume "epochs" has been adapted to train as long as is left at the point of this checkpoint.
@@ -168,7 +160,53 @@ def train_model(model, train_dataset, val_dataset, num_classes, loss_fn, batch_s
 ##########################
 
 # Regular training of a model
-train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, batch_size=batch_size, epochs=60)
+train_model(model, train_ds, val_ds, num_classes, SparseCategoricalCrossentropy, epochs=6)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # cb.show_predictions(dataset=train_ds, num=1)
 # print(model.predict(train_ds))
